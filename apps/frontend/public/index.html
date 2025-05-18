@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Redpanda Message App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #messages {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 10px;
+            height: 300px;
+            overflow-y: auto;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Redpanda Message App</h1>
+    <div>
+        <input type="text" id="messageInput" placeholder="Enter your message">
+        <button onclick="sendMessage()">Send Message</button>
+        <button onclick="getMessages()">Refresh Messages</button>
+    </div>
+    <div id="messages"></div>
+
+    <script>
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const content = input.value;
+            if (!content) return;
+
+            try {
+                const response = await fetch('/api/send-message', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content })
+                });
+                const data = await response.json();
+                input.value = '';
+                getMessages();
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        async function getMessages() {
+            try {
+                const response = await fetch('/api/messages');
+                const data = await response.json();
+                const messagesDiv = document.getElementById('messages');
+                messagesDiv.innerHTML = data.messages
+                    .map(msg => `<div class="message">${msg.message}</div>`)
+                    .join('');
+            } catch (error) {
+                console.error('Error:', error);
+            }
+        }
+
+        // Load messages on page load
+        getMessages();
+    </script>
+</body>
+</html>
