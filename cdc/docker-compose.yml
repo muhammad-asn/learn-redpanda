@@ -1,0 +1,110 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: postgres
+    ports:
+      - 5432:5432
+    # Enable WAL level logical to allow CDC (Change Data Capture)
+    command: postgres -c wal_level=logical
+    healthcheck:
+      test: "pg_isready -U postgresuser -d pandashop"
+      interval: 2s
+      timeout: 20s
+      retries: 10
+    environment:
+      - POSTGRES_USER=postgresuser
+      - POSTGRES_PASSWORD=postgrespw
+      - POSTGRES_DB=pandashop
+      - PGPASSWORD=postgrespw
+    volumes:
+      - ./data:/docker-entrypoint-initdb.d
+      - postgres_data:/var/lib/postgresql/data
+  
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.13
+    container_name: redpanda
+    command:
+      - redpanda start
+      # Mode dev-container uses well-known configuration properties for development in containers.
+      - --mode dev-container
+      # Tells Seastar (the framework Redpanda uses under the hood) to use 1 core on the system.
+      - --smp 1
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      # Address the broker advertises to clients that connect to the Kafka API.
+      # Use the internal addresses to connect to the Redpanda brokers
+      # from inside the same Docker network.
+      # Use the external addresses to connect to the Redpanda brokers
+      # from outside the Docker network.
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      # Address the broker advertises to clients that connect to the HTTP Proxy.
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      # Redpanda brokers use the RPC API to communicate with each other internally.
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+    ports:
+      - 18081:18081
+      - 18082:18082
+      - 19092:19092
+      - 19644:9644
+    volumes:
+      - redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+  
+  redpanda-console:
+    container_name: redpanda-console
+    image: docker.redpanda.com/redpandadata/console:v3.1.2
+    entrypoint: /bin/sh
+    command: -c 'echo "$$CONSOLE_CONFIG_FILE" > /tmp/config.yml && /app/console'
+    volumes:
+      - ./config:/tmp/config/
+    environment:
+      CONFIG_FILEPATH: ${CONFIG_FILEPATH:-/tmp/config.yml}
+      CONSOLE_CONFIG_FILE: |
+        # Configure a connection to the Redpanda cluster
+        # See https://docs.redpanda.com/current/console/config/connect-to-redpanda/
+        kafka:
+          brokers: ["redpanda:9092"]
+        console:
+          # Configures Redpanda Console to fetch topic documentation from GitHub and display it in the UI.
+          # See https://docs.redpanda.com/current/console/config/topic-documentation/
+          topicDocumentation:
+            enabled: true
+            git:
+              enabled: true
+              repository:
+                url: https://github.com/redpanda-data/docs
+                branch: main
+                baseDirectory: tests/docker-compose
+    ports:
+      - 8080:8080
+    depends_on:
+      redpanda:
+        condition: service_healthy
+  
+  debezium:
+    image: debezium/connect:2.4
+    container_name: debezium
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: 1
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      - 8083:8083
+
+name: redpanda-cdc-postgres
+volumes:
+  redpanda:
+  postgres_data:
